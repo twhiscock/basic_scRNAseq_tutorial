@@ -1,0 +1,145 @@
+---
+title: "scRNAseq tutorial"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+
+```{r setup, include =FALSE, echo=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "data/") #set data dir
+source("master_scripts.R") #set scripts dir
+```
+
+## Load data 
+
+We have downloaded data from ArrayExpress. See the README file for its format. 
+
+```{r}
+counts <- readMM("countsMatrix.mtx")
+genes <- read.csv("genes.csv", header = F)$V1
+cells <- read.csv("cells.csv", header = F)$V1
+rownames(counts) <- genes
+colnames(counts) <- cells
+meta <- as.data.frame(read.csv("meta.csv"))
+labels <- as.data.frame(read.csv("labels.csv"))
+```
+
+Have a quick look at the data structures.
+
+```{r}
+head(meta)
+counts[1:10,1:5]
+head(labels)
+```
+If you are loading data from 10X output, you can use the command: read10xCounts to read in the data.
+
+```{r}
+#labels <- as.data.frame(read.csv("labels.csv"))
+#sce <- read10xCounts(paste0(labels$Sample))
+#counts <- assembleCounts(sce)
+#meta <- assembleMeta(sce,labels)
+#rownames(counts) <- rownames(sce)
+```
+
+
+## Normalize and select HVGs
+
+We normalize the data by library size, and select HVGs for projection and clustering based on mean expression, and fano factor. 
+
+```{r}
+meta$umi <- Matrix::colSums(counts)
+countn <- normalize(counts)
+hvg_1 <- compute_hvg(countn, lowmean = 0.05, highmean = 1.0, fano = 0.8)
+dim(hvg_1)
+```
+
+## Projection
+
+We then project the data to two dimensions using UMAP. (Note, slightly different projections will be generated based on the choice of seed.)
+
+  
+```{r}
+meta <- umap_project(meta,hvg_1, neighbors = 20, dist = 0.5, seed = 10, pca = NULL)
+plotMeta(meta)
+```
+
+Plot two batches - replicates don't replicate!
+
+```{r}
+plotSample(meta,which(meta$sample == "SIGAC8"), title = "ST46_intact_tail_batch1")
+plotSample(meta,which(meta$sample == "SIGAA11"), title = "ST46_intact_tail_batch2")
+```
+
+
+
+## Correct for batch effect
+
+We exclude highly expressed genes to avoid batch effects.
+
+```{r}
+hvg <- compute_hvg(countn, lowmean = 0.05, highmean = 0.8, fano = 0.8)
+dim(hvg)
+meta <- umap_project(meta,hvg, neighbors = 20, dist = 0.5, seed = 10, pca = NULL)
+plotMeta(meta)
+```
+
+Now replicates look better.
+
+```{r}
+plotSample(meta,which(meta$sample == "SIGAC8"), title = "ST46_intact_tail_batch1")
+plotSample(meta,which(meta$sample == "SIGAA11"), title = "ST46_intact_tail_batch2")
+
+```
+## Clustering
+
+First, here we can cheat and use the cluster labels from Aztekin et al. 2019
+
+```{r}
+meta_old <- meta
+plotMeta(meta_old,mode="cluster")
+```
+
+We cluster data using graphical based clustering, using UMAPs graph. 
+
+```{r}
+meta <- umap_cluster(meta,hvg, neighbors = 10, steps = 10)
+plotMeta(meta,mode="cluster")
+```
+
+Recommendation: once you have settled on a project and clustering, you may want to save it and then just reload anytime you want to use it.
+
+
+## Annotating the atlas and finding differentially expressed genes
+
+Plot a single gene
+
+```{r}
+plotGene(meta,countn,"sp9.L", title = "sp9.L", size = 0.5)
+```
+
+
+
+Find putative markers for each cluster. (Here, we use HVGS. It is also possible to use all genes, COUNTN, but this is slower)
+
+```{r}
+markers <- findMarkers(x = log2(hvg +1), groups = meta$cluster,direction = "up")
+```
+
+Explore these marker genes
+```{r}
+as.data.frame(markers[["22"]])
+```
+
+You can use the findMarkers function to compare any groups of cells (e.g., different conditions.)
+
+
+
+
+
+
+
+
